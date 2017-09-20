@@ -171,9 +171,8 @@ public class LogSignatureVerifier {
    */
   boolean verifySignature(Ct.SignedCertificateTimestamp sct, Certificate leafCert) {
     if (!logInfo.isSameLogId(sct.getId().getKeyId().toByteArray())) {
-      throw new CertificateTransparencyException(
-          String.format(
-              "Log ID of SCT (%s) does not match this log's ID.", sct.getId().getKeyId()));
+      throw new CertificateTransparencyException(String.format(
+          "Log ID of SCT (%s) does not match this log's ID (%s).", LogInfo.bytesToHex(sct.getId().getKeyId().toByteArray()), LogInfo.bytesToHex(logInfo.getID())));
     }
     byte[] toVerify = serializeSignedSCTData(leafCert, sct);
 
@@ -294,18 +293,15 @@ public class LogSignatureVerifier {
   }
 
   private boolean verifySCTSignatureOverBytes(Ct.SignedCertificateTimestamp sct, byte[] toVerify) {
-    final String sigAlg;
-    if (logInfo.getSignatureAlgorithm().equals("EC")) {
-      sigAlg = "SHA256withECDSA";
-    } else if (logInfo.getSignatureAlgorithm().equals("RSA")) {
-      sigAlg = "SHA256withRSA";
-    } else {
-      throw new CertificateTransparencyException(
-          String.format("Unsupported signature algorithm %s", logInfo.getSignatureAlgorithm()));
+    final String signatureAlgorithm = logInfo.getSignatureAlgorithm();
+    if (!(signatureAlgorithm.equals("EC") || signatureAlgorithm.equals("RSA"))) {
+      throw new CertificateTransparencyException(String.format("Only EC or RSA signatures are supported. %s is not supported.", signatureAlgorithm));
     }
 
     try {
-      Signature signature = Signature.getInstance(sigAlg);
+      Signature signature = signatureAlgorithm.equals("EC")
+          ? Signature.getInstance("SHA256withECDSA")
+          : Signature.getInstance("SHA256withRSA");
       signature.initVerify(logInfo.getKey());
       signature.update(toVerify);
       return signature.verify(sct.getSignature().getSignature().toByteArray());
@@ -317,7 +313,8 @@ public class LogSignatureVerifier {
     } catch (InvalidKeyException e) {
       throw new CertificateTransparencyException("Log's public key cannot be used", e);
     } catch (NoSuchAlgorithmException e) {
-      throw new UnsupportedCryptoPrimitiveException(sigAlg + " not supported by this JVM", e);
+      throw new UnsupportedCryptoPrimitiveException(
+          "Sha-256 with ECDSA not supported by this JVM", e);
     }
   }
 

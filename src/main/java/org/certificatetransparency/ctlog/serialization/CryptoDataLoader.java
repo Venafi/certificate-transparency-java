@@ -4,11 +4,6 @@ import com.google.common.base.Joiner;
 import com.google.common.io.Files;
 
 import org.apache.commons.codec.binary.Base64;
-import org.bouncycastle.asn1.ASN1ObjectIdentifier;
-import org.bouncycastle.asn1.ASN1Sequence;
-import org.bouncycastle.asn1.DLSequence;
-import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
-import org.bouncycastle.asn1.x9.X9ObjectIdentifiers;
 import org.certificatetransparency.ctlog.UnsupportedCryptoPrimitiveException;
 
 import java.io.BufferedInputStream;
@@ -84,35 +79,25 @@ public class CryptoDataLoader {
     // The contents are PEM encoded - first and last lines are header and footer.
     String b64string = Joiner.on("").join(pemLines.subList(1, pemLines.size() - 1));
     // Extract public key
-    byte[] keyBytes = Base64.decodeBase64(b64string);
-    String keyAlg = determineKeyAlg(keyBytes);
-    X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
-    KeyFactory kf;
+    X509EncodedKeySpec spec = new X509EncodedKeySpec(Base64.decodeBase64(b64string));
+    // Note: EC KeyFactory does not exist in openjdk, only Oracle's JDK.
+    KeyFactory kf = null;
     try {
-      // Note: EC KeyFactory does not exist in openjdk, only Oracle's JDK.
-      kf = KeyFactory.getInstance(keyAlg);
+      kf = KeyFactory.getInstance("EC");
       return kf.generatePublic(spec);
     } catch (NoSuchAlgorithmException e) {
       // EC is known to be missing from openjdk; Oracle's JDK must be used.
-      throw new UnsupportedCryptoPrimitiveException(keyAlg + " support missing", e);
-    } catch (InvalidKeySpecException e) {
-      throw new InvalidInputException("Log public key is invalid", e);
-    }
-  }
-
-  /**
-   * Parses the beginning of a key, and determines the key algorithm (RSA or EC) based on the OID
-   */
-  private static String determineKeyAlg(byte[] keyBytes) {
-    ASN1Sequence seq = ASN1Sequence.getInstance(keyBytes);
-    DLSequence seq1 = (DLSequence) seq.getObjects().nextElement();
-    ASN1ObjectIdentifier oid = (ASN1ObjectIdentifier) seq1.getObjects().nextElement();
-    if (PKCSObjectIdentifiers.rsaEncryption.equals(oid)) {
-      return "RSA";
-    } else if (X9ObjectIdentifiers.id_ecPublicKey.equals(oid)) {
-      return "EC";
-    } else {
-      throw new IllegalArgumentException("Unsupported key type: " + oid);
+      throw new UnsupportedCryptoPrimitiveException("EC support missing", e);
+    } catch (NullPointerException | InvalidKeySpecException e) {
+      // Not EC key, so try to parse as RSA
+      try {
+        kf = KeyFactory.getInstance("RSA");
+        PublicKey pk = kf.generatePublic(spec);
+	System.out.println("Public key parsed");
+	return pk;
+      } catch (InvalidKeySpecException | NoSuchAlgorithmException e1) {
+        throw new InvalidInputException("Log public key is invalid. " + e1.getMessage(), e);
+      }
     }
   }
 
